@@ -1,0 +1,793 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PONG // NEON GRID</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Share+Tech+Mono&display=swap');
+
+  :root {
+    --cyan: #00f5ff;
+    --magenta: #ff00aa;
+    --dark: #020810;
+    --grid: rgba(0,245,255,0.04);
+    --glow-cyan: 0 0 10px #00f5ff, 0 0 30px #00f5ff55, 0 0 60px #00f5ff22;
+    --glow-mag:  0 0 10px #ff00aa, 0 0 30px #ff00aa55, 0 0 60px #ff00aa22;
+  }
+
+  * { margin:0; padding:0; box-sizing:border-box; }
+
+  body {
+    background: var(--dark);
+    font-family: 'Orbitron', monospace;
+    color: var(--cyan);
+    height: 100vh;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    overflow: hidden;
+    cursor: none;
+  }
+
+  body::before {
+    content: ''; position: fixed; inset: 0;
+    background-image: linear-gradient(var(--grid) 1px, transparent 1px),
+                      linear-gradient(90deg, var(--grid) 1px, transparent 1px);
+    background-size: 40px 40px;
+    pointer-events: none; z-index: 0;
+  }
+  body::after {
+    content: ''; position: fixed; inset: 0;
+    background: radial-gradient(ellipse at 50% 50%, transparent 40%, #020810cc 100%);
+    pointer-events: none; z-index: 0;
+  }
+
+  /* ── HUD ── */
+  #hud {
+    position: relative; z-index: 2;
+    display: flex; align-items: center; justify-content: space-between;
+    width: 700px; margin-bottom: 16px; padding: 0 8px;
+  }
+  .score-panel { display:flex; flex-direction:column; align-items:center; gap:2px; }
+  .score-label { font-size:9px; letter-spacing:4px; opacity:.5; font-family:'Share Tech Mono',monospace; }
+  .score { font-size:48px; font-weight:900; line-height:1; }
+  .score.player { color:var(--cyan);    text-shadow:var(--glow-cyan); }
+  .score.cpu    { color:var(--magenta); text-shadow:var(--glow-mag);  }
+  #title-center { text-align:center; }
+  #title-center h1 { font-size:11px; letter-spacing:8px; opacity:.4; font-weight:400; }
+  #title-center .divider {
+    width:1px; height:30px;
+    background: linear-gradient(to bottom, transparent, var(--cyan), transparent);
+    margin:6px auto; opacity:.3;
+  }
+
+  /* ── Canvas wrap ── */
+  #game-wrap { position:relative; z-index:2; }
+  canvas {
+    display:block;
+    border:1px solid rgba(0,245,255,.15);
+    box-shadow: 0 0 0 1px rgba(0,245,255,.05),
+                inset 0 0 80px rgba(0,245,255,.03),
+                0 0 60px rgba(0,245,255,.1);
+  }
+
+  /* ── Shared overlay base ── */
+  .panel {
+    position:absolute; inset:0; display:none; flex-direction:column;
+    align-items:center; justify-content:center;
+  }
+
+  /* ── Main overlay (start / end) ── */
+  #overlay {
+    background: rgba(2,8,16,.88); z-index:10; gap:20px;
+  }
+  #overlay h2 {
+    font-size:36px; font-weight:900; letter-spacing:6px;
+    text-shadow:var(--glow-cyan); animation:flicker 3s infinite;
+  }
+  #overlay .sub { font-size:10px; letter-spacing:4px; opacity:.5; font-family:'Share Tech Mono',monospace; }
+  #overlay .result { font-size:14px; letter-spacing:3px; margin-top:-8px; }
+  .result.win  { color:var(--cyan);    text-shadow:var(--glow-cyan); }
+  .result.lose { color:var(--magenta); text-shadow:var(--glow-mag);  }
+
+  #start-btn {
+    margin-top:12px; padding:12px 40px;
+    background:transparent; border:1px solid var(--cyan);
+    color:var(--cyan); font-family:'Orbitron',monospace;
+    font-size:11px; font-weight:700; letter-spacing:5px;
+    cursor:pointer; transition:all .2s;
+    box-shadow:var(--glow-cyan), inset 0 0 20px rgba(0,245,255,.05);
+    clip-path:polygon(8px 0%,100% 0%,calc(100% - 8px) 100%,0% 100%);
+  }
+  #start-btn:hover { background:rgba(0,245,255,.1); letter-spacing:7px; }
+
+  /* ── Death screen ── */
+  #death-screen {
+    background:rgba(2,8,16,.75); z-index:20; pointer-events:none; gap:10px;
+  }
+  .death-who { font-size:12px; letter-spacing:6px; opacity:.55; font-family:'Share Tech Mono',monospace; }
+  .death-text { font-size:58px; font-weight:900; letter-spacing:6px; }
+  .death-text.player-pt { color:var(--magenta); text-shadow:var(--glow-mag); }
+  .death-text.cpu-pt    { color:var(--cyan);    text-shadow:var(--glow-cyan); }
+  .death-sub { font-size:10px; letter-spacing:4px; opacity:.4; font-family:'Share Tech Mono',monospace; margin-top:6px; }
+
+  /* ── Countdown ── */
+  #countdown {
+    background:rgba(2,8,16,.45); z-index:15; pointer-events:none;
+  }
+  #countdown-num {
+    font-size:130px; font-weight:900;
+    color:var(--cyan); text-shadow:var(--glow-cyan);
+    animation:countPop .3s cubic-bezier(.22,1,.36,1);
+  }
+  #countdown-num.go {
+    font-size:80px; color:var(--magenta); text-shadow:var(--glow-mag); letter-spacing:10px;
+  }
+
+  /* ── Pause ── */
+  #pause-screen {
+    background:rgba(2,8,16,.72); z-index:18; pointer-events:none; gap:14px;
+  }
+  #pause-screen h3 {
+    font-size:36px; font-weight:900; letter-spacing:12px;
+    color:var(--cyan); text-shadow:var(--glow-cyan);
+    animation:pausePulse 1.4s ease-in-out infinite;
+  }
+  .pause-sub { font-size:9px; letter-spacing:4px; opacity:.3; font-family:'Share Tech Mono',monospace; }
+  .pause-lines { display:flex; gap:12px; margin-top:4px; }
+  .pause-line { width:28px; height:38px; border:1px solid rgba(0,245,255,.25); }
+
+  /* ── Music toggle ── */
+  #music-btn {
+    position:absolute; bottom:10px; right:12px; z-index:30;
+    background:transparent; border:1px solid rgba(0,245,255,.25);
+    color:rgba(0,245,255,.5); font-family:'Share Tech Mono',monospace;
+    font-size:9px; letter-spacing:2px; padding:5px 10px;
+    cursor:pointer; transition:all .2s;
+  }
+  #music-btn:hover { border-color:var(--cyan); color:var(--cyan); }
+
+  /* ── Footer info ── */
+  #info {
+    position:relative; z-index:2; margin-top:14px;
+    font-size:9px; letter-spacing:3px; opacity:.25;
+    font-family:'Share Tech Mono',monospace;
+  }
+
+  /* ── Animations ── */
+  @keyframes flicker {
+    0%,95%,100%{opacity:1} 96%{opacity:.4} 97%{opacity:1} 98%{opacity:.2} 99%{opacity:1}
+  }
+  @keyframes countPop {
+    0%{transform:scale(2);opacity:0} 60%{transform:scale(.9);opacity:1} 100%{transform:scale(1);opacity:1}
+  }
+  @keyframes pausePulse {
+    0%,100%{opacity:1} 50%{opacity:.3}
+  }
+
+  /* ── Cursor ── */
+  #cursor {
+    position:fixed; width:8px; height:8px;
+    border:1px solid var(--cyan); border-radius:50%;
+    pointer-events:none; z-index:999;
+    transform:translate(-50%,-50%);
+    box-shadow:var(--glow-cyan);
+  }
+</style>
+</head>
+<body>
+
+<div id="cursor"></div>
+
+<div id="hud">
+  <div class="score-panel">
+    <div class="score-label">PLAYER</div>
+    <div class="score player" id="p-score">0</div>
+  </div>
+  <div id="title-center">
+    <h1>NEON // PONG</h1>
+    <div class="divider"></div>
+    <h1>GRID ARENA</h1>
+  </div>
+  <div class="score-panel">
+    <div class="score-label">CPU</div>
+    <div class="score cpu" id="c-score">0</div>
+  </div>
+</div>
+
+<div id="game-wrap">
+  <canvas id="c" width="700" height="460"></canvas>
+
+  <!-- Main overlay -->
+  <div class="panel" id="overlay" style="display:flex">
+    <div class="sub">NEON PONG // GRID ARENA</div>
+    <h2 id="overlay-title">INITIALIZING</h2>
+    <div class="result" id="result-msg"></div>
+    <button id="start-btn">LAUNCH GAME</button>
+  </div>
+
+  <!-- Death screen -->
+  <div class="panel" id="death-screen">
+    <div class="death-who" id="death-who"></div>
+    <div class="death-text" id="death-text"></div>
+    <div class="death-sub" id="death-sub"></div>
+  </div>
+
+  <!-- Countdown -->
+  <div class="panel" id="countdown">
+    <div id="countdown-num">3</div>
+  </div>
+
+  <!-- Pause -->
+  <div class="panel" id="pause-screen">
+    <div class="pause-lines"><div class="pause-line"></div><div class="pause-line"></div></div>
+    <h3>PAUSED</h3>
+    <div class="pause-sub">PRESS ESC TO RESUME</div>
+  </div>
+
+  <!-- Music toggle -->
+  <button id="music-btn">♪ MUSIC ON</button>
+</div>
+
+<div id="info">MOUSE = PADDLE &nbsp;|&nbsp; ESC = PAUSE &nbsp;|&nbsp; FIRST TO 7 WINS</div>
+
+<script>
+// ═══════════════════════════════════════════════════════════
+//  AUDIO ENGINE
+// ═══════════════════════════════════════════════════════════
+let audioCtx = null;
+let musicOn = true;
+let musicNodes = {};
+let musicScheduled = false;
+
+function getAudioCtx() {
+  if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  return audioCtx;
+}
+
+// ── SFX ──────────────────────────────────────────────────────
+function sfxPaddleHit() {
+  const ac = getAudioCtx();
+  const osc = ac.createOscillator();
+  const gain = ac.createGain();
+  osc.connect(gain); gain.connect(ac.destination);
+  osc.type = 'square';
+  osc.frequency.setValueAtTime(480, ac.currentTime);
+  osc.frequency.exponentialRampToValueAtTime(380, ac.currentTime + 0.06);
+  gain.gain.setValueAtTime(0.18, ac.currentTime);
+  gain.gain.exponentialRampToValueAtTime(0.001, ac.currentTime + 0.08);
+  osc.start(ac.currentTime);
+  osc.stop(ac.currentTime + 0.09);
+}
+
+function sfxWallHit() {
+  const ac = getAudioCtx();
+  const osc = ac.createOscillator();
+  const gain = ac.createGain();
+  osc.connect(gain); gain.connect(ac.destination);
+  osc.type = 'square';
+  osc.frequency.setValueAtTime(260, ac.currentTime);
+  osc.frequency.exponentialRampToValueAtTime(210, ac.currentTime + 0.05);
+  gain.gain.setValueAtTime(0.12, ac.currentTime);
+  gain.gain.exponentialRampToValueAtTime(0.001, ac.currentTime + 0.06);
+  osc.start(ac.currentTime);
+  osc.stop(ac.currentTime + 0.07);
+}
+
+function sfxScore(playerScored) {
+  const ac = getAudioCtx();
+  const freqs = playerScored
+    ? [523, 659, 784, 1047]   // C5 E5 G5 C6 — win fanfare
+    : [220, 196, 165, 130];   // descending — loss
+  freqs.forEach((f, i) => {
+    const osc = ac.createOscillator();
+    const gain = ac.createGain();
+    osc.connect(gain); gain.connect(ac.destination);
+    osc.type = 'square';
+    const t = ac.currentTime + i * 0.12;
+    osc.frequency.setValueAtTime(f, t);
+    gain.gain.setValueAtTime(0.15, t);
+    gain.gain.exponentialRampToValueAtTime(0.001, t + 0.18);
+    osc.start(t); osc.stop(t + 0.2);
+  });
+}
+
+function sfxCountdown(isGo) {
+  const ac = getAudioCtx();
+  const osc = ac.createOscillator();
+  const gain = ac.createGain();
+  osc.connect(gain); gain.connect(ac.destination);
+  osc.type = 'square';
+  osc.frequency.setValueAtTime(isGo ? 880 : 440, ac.currentTime);
+  gain.gain.setValueAtTime(isGo ? 0.2 : 0.14, ac.currentTime);
+  gain.gain.exponentialRampToValueAtTime(0.001, ac.currentTime + (isGo ? 0.3 : 0.12));
+  osc.start(ac.currentTime);
+  osc.stop(ac.currentTime + (isGo ? 0.35 : 0.15));
+}
+
+// ── RETRO CHIPTUNE MUSIC ─────────────────────────────────────
+// A driving 4/4 chiptune loop using Web Audio oscillators + noise
+// Melody, bass, and percussion layers scheduled ahead of time.
+
+const BPM = 128;
+const BEAT = 60 / BPM;       // seconds per beat
+const BAR  = BEAT * 4;        // 4 beats per bar
+const LOOP_BARS = 8;
+const LOOP_LEN  = BAR * LOOP_BARS;
+
+// Melody pattern (notes as semitones from C4=261.63)
+// 16th-note grid (32 steps over 2 bars, repeated x4)
+const C4 = 261.63;
+function semitone(n) { return C4 * Math.pow(2, n/12); }
+
+// Two-bar melody phrase (16th notes, null = rest)
+const melPhrase = [
+  0,null,7,null, 5,null,3,null,  5,null,7,null,  0,null,12,null,
+  10,null,10,null, 8,null,7,null, 8,null,7,null,  5,null,null,null,
+];
+
+// Two-bar bass phrase
+const bassPhrase = [
+  0,null,null,0,  null,null,7,null,  0,null,null,0,  null,7,null,null,
+  -5,null,null,-5, null,null,2,null, -5,null,null,-5, null,2,null,null,
+];
+
+// Arpeggio pattern (16th notes) — plays chords
+const arpPhrase = [
+  0,4,7,12, 0,4,7,12,  0,4,7,12,  0,4,7,12,
+  -5,0,3,7, -5,0,3,7,  -5,0,3,7,  -5,0,3,7,
+];
+
+const SIXTEENTH = BEAT / 4;
+
+let musicLoopTimer = null;
+let masterGain = null;
+
+function buildMasterGain() {
+  if (!masterGain) {
+    const ac = getAudioCtx();
+    masterGain = ac.createGain();
+    masterGain.gain.value = musicOn ? 0.4 : 0;
+    masterGain.connect(ac.destination);
+  }
+  return masterGain;
+}
+
+function scheduleChip(startTime) {
+  const ac = getAudioCtx();
+  const mg = buildMasterGain();
+  const now = startTime;
+
+  // Helper: create a short oscillator note
+  function note(dest, type, freq, t, dur, vol) {
+    const osc  = ac.createOscillator();
+    const gain = ac.createGain();
+    osc.type = type;
+    osc.frequency.value = freq;
+    osc.connect(gain); gain.connect(dest);
+    gain.gain.setValueAtTime(0.001, t);
+    gain.gain.linearRampToValueAtTime(vol, t + 0.005);
+    gain.gain.setValueAtTime(vol, t + dur * 0.6);
+    gain.gain.exponentialRampToValueAtTime(0.001, t + dur * 0.95);
+    osc.start(t); osc.stop(t + dur);
+  }
+
+  // Helper: kick drum (sine thump)
+  function kick(t) {
+    const osc  = ac.createOscillator();
+    const gain = ac.createGain();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(120, t);
+    osc.frequency.exponentialRampToValueAtTime(40, t + 0.1);
+    osc.connect(gain); gain.connect(mg);
+    gain.gain.setValueAtTime(0.5, t);
+    gain.gain.exponentialRampToValueAtTime(0.001, t + 0.18);
+    osc.start(t); osc.stop(t + 0.2);
+  }
+
+  // Helper: snare (noise burst)
+  function snare(t) {
+    const buf = ac.createBuffer(1, ac.sampleRate * 0.1, ac.sampleRate);
+    const data = buf.getChannelData(0);
+    for (let i = 0; i < data.length; i++) data[i] = Math.random() * 2 - 1;
+    const src  = ac.createBufferSource();
+    const gain = ac.createGain();
+    const filt = ac.createBiquadFilter();
+    filt.type = 'highpass'; filt.frequency.value = 1800;
+    src.buffer = buf;
+    src.connect(filt); filt.connect(gain); gain.connect(mg);
+    gain.gain.setValueAtTime(0.22, t);
+    gain.gain.exponentialRampToValueAtTime(0.001, t + 0.08);
+    src.start(t); src.stop(t + 0.1);
+  }
+
+  // Helper: hihat
+  function hihat(t, vol=0.06) {
+    const buf = ac.createBuffer(1, ac.sampleRate * 0.04, ac.sampleRate);
+    const data = buf.getChannelData(0);
+    for (let i = 0; i < data.length; i++) data[i] = Math.random() * 2 - 1;
+    const src  = ac.createBufferSource();
+    const gain = ac.createGain();
+    const filt = ac.createBiquadFilter();
+    filt.type = 'highpass'; filt.frequency.value = 6000;
+    src.buffer = buf;
+    src.connect(filt); filt.connect(gain); gain.connect(mg);
+    gain.gain.setValueAtTime(vol, t);
+    gain.gain.exponentialRampToValueAtTime(0.001, t + 0.03);
+    src.start(t); src.stop(t + 0.04);
+  }
+
+  // Melody layer (pulse)
+  for (let step = 0; step < melPhrase.length * 4; step++) {
+    const semis = melPhrase[step % melPhrase.length];
+    if (semis !== null) {
+      const t = now + step * SIXTEENTH;
+      note(mg, 'square', semitone(semis + 12), t, SIXTEENTH * 0.8, 0.12);
+    }
+  }
+
+  // Arp layer (triangle, quieter)
+  for (let step = 0; step < arpPhrase.length * 4; step++) {
+    const semis = arpPhrase[step % arpPhrase.length];
+    if (semis !== null) {
+      const t = now + step * SIXTEENTH;
+      note(mg, 'triangle', semitone(semis + 7), t, SIXTEENTH * 0.5, 0.07);
+    }
+  }
+
+  // Bass layer (sawtooth, low octave)
+  for (let step = 0; step < bassPhrase.length * 4; step++) {
+    const semis = bassPhrase[step % bassPhrase.length];
+    if (semis !== null) {
+      const t = now + step * SIXTEENTH;
+      note(mg, 'sawtooth', semitone(semis - 12), t, SIXTEENTH * 0.9, 0.15);
+    }
+  }
+
+  // Drums (over full loop)
+  const totalBeats = BAR * LOOP_BARS / BEAT;
+  for (let beat = 0; beat < totalBeats; beat++) {
+    const t = now + beat * BEAT;
+    // Kick on 1 and 3
+    if (beat % 4 === 0 || beat % 4 === 2) kick(t);
+    // Snare on 2 and 4
+    if (beat % 4 === 1 || beat % 4 === 3) snare(t);
+    // 8th-note hihats
+    hihat(t);
+    hihat(t + BEAT * 0.5);
+  }
+}
+
+function startMusic() {
+  if (musicScheduled) return;
+  musicScheduled = true;
+  const ac = getAudioCtx();
+  buildMasterGain();
+
+  let nextLoop = ac.currentTime + 0.05;
+
+  function loop() {
+    scheduleChip(nextLoop);
+    nextLoop += LOOP_LEN;
+    // Schedule next loop 1 second before it's needed
+    musicLoopTimer = setTimeout(loop, (LOOP_LEN - 1) * 1000);
+  }
+  loop();
+}
+
+function stopMusic() {
+  musicScheduled = false;
+  if (musicLoopTimer) { clearTimeout(musicLoopTimer); musicLoopTimer = null; }
+}
+
+function setMusicVolume(v) {
+  if (masterGain) {
+    const ac = getAudioCtx();
+    masterGain.gain.cancelScheduledValues(ac.currentTime);
+    masterGain.gain.linearRampToValueAtTime(v, ac.currentTime + 0.3);
+  }
+}
+
+document.getElementById('music-btn').addEventListener('click', () => {
+  musicOn = !musicOn;
+  document.getElementById('music-btn').textContent = musicOn ? '♪ MUSIC ON' : '♪ MUSIC OFF';
+  if (musicOn) {
+    if (!musicScheduled) startMusic();
+    setMusicVolume(0.4);
+  } else {
+    setMusicVolume(0);
+  }
+});
+
+// ═══════════════════════════════════════════════════════════
+//  GAME
+// ═══════════════════════════════════════════════════════════
+const canvas  = document.getElementById('c');
+const ctx     = canvas.getContext('2d');
+const overlay = document.getElementById('overlay');
+const startBtn       = document.getElementById('start-btn');
+const pScoreEl       = document.getElementById('p-score');
+const cScoreEl       = document.getElementById('c-score');
+const resultMsg      = document.getElementById('result-msg');
+const overlayTitle   = document.getElementById('overlay-title');
+const deathScreen    = document.getElementById('death-screen');
+const deathWhoEl     = document.getElementById('death-who');
+const deathTextEl    = document.getElementById('death-text');
+const deathSubEl     = document.getElementById('death-sub');
+const countdownEl    = document.getElementById('countdown');
+const countdownNum   = document.getElementById('countdown-num');
+const pauseScreen    = document.getElementById('pause-screen');
+const cursor         = document.getElementById('cursor');
+
+const W = canvas.width, H = canvas.height;
+const PAD_W = 10, PAD_H = 80, PAD_MARGIN = 18;
+const BALL_R = 7;
+const WIN_SCORE = 7;
+const CPU_SPEED = 3.2;
+
+let pY = H/2 - PAD_H/2;
+let cY = H/2 - PAD_H/2;
+let ball = {};
+let pScore = 0, cScore = 0;
+let running = false, paused = false, inCountdown = false;
+let trail = [], particles = [];
+
+// ── Ball ──────────────────────────────────────────────────────
+function resetBall(dir = 1) {
+  const speed = 5.5, angle = Math.random() * 0.8 - 0.4;
+  ball = { x: W/2, y: H/2, vx: speed * dir, vy: speed * Math.sin(angle), speed };
+  trail = [];
+}
+
+// ── Particles ─────────────────────────────────────────────────
+function spawnParticles(x, y, color, count = 18) {
+  for (let i = 0; i < count; i++) {
+    const ang = Math.random() * Math.PI * 2;
+    const spd = Math.random() * 5 + 1;
+    particles.push({ x, y, vx: Math.cos(ang)*spd, vy: Math.sin(ang)*spd, life: 1, color });
+  }
+}
+
+// ── Update ────────────────────────────────────────────────────
+function update() {
+  if (!running || paused) return;
+
+  ball.x += ball.vx;
+  ball.y += ball.vy;
+  trail.push({x: ball.x, y: ball.y});
+  if (trail.length > 16) trail.shift();
+
+  // Wall bounce
+  if (ball.y - BALL_R <= 0) {
+    ball.y = BALL_R; ball.vy = Math.abs(ball.vy);
+    spawnParticles(ball.x, 0, '#ffffff', 10);
+    sfxWallHit();
+  }
+  if (ball.y + BALL_R >= H) {
+    ball.y = H - BALL_R; ball.vy = -Math.abs(ball.vy);
+    spawnParticles(ball.x, H, '#ffffff', 10);
+    sfxWallHit();
+  }
+
+  // Player paddle
+  if (ball.vx < 0 &&
+      ball.x - BALL_R <= PAD_MARGIN + PAD_W &&
+      ball.x - BALL_R >= PAD_MARGIN - 2 &&
+      ball.y >= pY && ball.y <= pY + PAD_H) {
+    const rel = (ball.y - (pY + PAD_H/2)) / (PAD_H/2);
+    ball.speed = Math.min(ball.speed + 0.3, 12);
+    ball.vx = ball.speed * Math.cos(rel * 1.1);
+    ball.vy = ball.speed * Math.sin(rel * 1.1);
+    ball.x = PAD_MARGIN + PAD_W + BALL_R + 1;
+    spawnParticles(ball.x, ball.y, '#00f5ff', 16);
+    sfxPaddleHit();
+  }
+
+  // CPU paddle
+  const cpuX = W - PAD_MARGIN - PAD_W;
+  if (ball.vx > 0 &&
+      ball.x + BALL_R >= cpuX &&
+      ball.x + BALL_R <= cpuX + PAD_W + 2 &&
+      ball.y >= cY && ball.y <= cY + PAD_H) {
+    const rel = (ball.y - (cY + PAD_H/2)) / (PAD_H/2);
+    ball.speed = Math.min(ball.speed + 0.2, 12);
+    ball.vx = -ball.speed * Math.cos(rel * 1.1);
+    ball.vy =  ball.speed * Math.sin(rel * 1.1);
+    ball.x = cpuX - BALL_R - 1;
+    spawnParticles(ball.x, ball.y, '#ff00aa', 16);
+    sfxPaddleHit();
+  }
+
+  // Scoring
+  if (ball.x < 0) {
+    cScore++; cScoreEl.textContent = cScore;
+    sfxScore(false);
+    spawnParticles(60, ball.y, '#ff00aa', 35);
+    running = false;
+    if (cScore >= WIN_SCORE) { showEndGame(false); return; }
+    showDeathScreen(false); return;
+  }
+  if (ball.x > W) {
+    pScore++; pScoreEl.textContent = pScore;
+    sfxScore(true);
+    spawnParticles(W-60, ball.y, '#00f5ff', 35);
+    running = false;
+    if (pScore >= WIN_SCORE) { showEndGame(true); return; }
+    showDeathScreen(true); return;
+  }
+
+  // CPU AI
+  const diff = ball.y - (cY + PAD_H/2);
+  cY = Math.max(0, Math.min(H - PAD_H, cY + Math.sign(diff) * Math.min(Math.abs(diff), CPU_SPEED)));
+
+  // Particles decay
+  particles.forEach(p => { p.x += p.vx; p.y += p.vy; p.vx *= 0.91; p.vy *= 0.91; p.life -= 0.034; });
+  particles = particles.filter(p => p.life > 0);
+}
+
+// ── Draw ──────────────────────────────────────────────────────
+function drawPaddle(x, y, color) {
+  ctx.save();
+  ctx.shadowBlur = 20; ctx.shadowColor = color; ctx.fillStyle = color;
+  ctx.fillRect(x, y + 4, PAD_W, PAD_H - 8);
+  ctx.fillStyle = '#fff'; ctx.globalAlpha = 0.3;
+  ctx.fillRect(x, y + 4, 2, PAD_H - 8);
+  ctx.restore();
+  ctx.save();
+  ctx.shadowBlur = 40; ctx.shadowColor = color; ctx.strokeStyle = color;
+  ctx.globalAlpha = 0.2; ctx.lineWidth = 1;
+  ctx.strokeRect(x - 4, y, PAD_W + 8, PAD_H);
+  ctx.restore();
+}
+
+function draw() {
+  ctx.clearRect(0, 0, W, H);
+
+  // Scanlines
+  ctx.fillStyle = 'rgba(0,0,0,0.03)';
+  for (let y = 0; y < H; y += 3) ctx.fillRect(0, y, W, 1);
+
+  // Center line
+  ctx.setLineDash([8, 12]);
+  ctx.strokeStyle = 'rgba(0,245,255,0.12)';
+  ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(W/2, 0); ctx.lineTo(W/2, H); ctx.stroke();
+  ctx.setLineDash([]);
+
+  // Center circle
+  ctx.beginPath(); ctx.arc(W/2, H/2, 50, 0, Math.PI*2);
+  ctx.strokeStyle = 'rgba(0,245,255,0.06)'; ctx.lineWidth = 1; ctx.stroke();
+
+  // Trail
+  trail.forEach((t, i) => {
+    const alpha = (i / trail.length) * 0.6;
+    const r = BALL_R * (i / trail.length) * 0.8;
+    ctx.beginPath(); ctx.arc(t.x, t.y, r, 0, Math.PI*2);
+    ctx.fillStyle = `rgba(0,245,255,${alpha})`; ctx.fill();
+  });
+
+  // Ball
+  if (running || inCountdown) {
+    ctx.save();
+    ctx.shadowBlur = 30; ctx.shadowColor = '#00f5ff';
+    ctx.beginPath(); ctx.arc(ball.x, ball.y, BALL_R, 0, Math.PI*2);
+    ctx.fillStyle = '#ffffff'; ctx.fill();
+    ctx.restore();
+    ctx.save();
+    ctx.shadowBlur = 60; ctx.shadowColor = '#00f5ff';
+    ctx.beginPath(); ctx.arc(ball.x, ball.y, BALL_R + 2, 0, Math.PI*2);
+    ctx.strokeStyle = 'rgba(0,245,255,0.4)'; ctx.lineWidth = 2; ctx.stroke();
+    ctx.restore();
+  }
+
+  // Particles
+  particles.forEach(p => {
+    ctx.save();
+    ctx.globalAlpha = p.life; ctx.fillStyle = p.color;
+    ctx.shadowBlur = 8; ctx.shadowColor = p.color;
+    ctx.fillRect(p.x - 2, p.y - 2, 4, 4);
+    ctx.restore();
+  });
+
+  drawPaddle(PAD_MARGIN, pY, '#00f5ff');
+  drawPaddle(W - PAD_MARGIN - PAD_W, cY, '#ff00aa');
+}
+
+function loop() { update(); draw(); requestAnimationFrame(loop); }
+
+// ── Death screen ──────────────────────────────────────────────
+function showDeathScreen(playerScored) {
+  deathWhoEl.textContent  = playerScored ? '// CPU UNIT ELIMINATED' : '// PLAYER SIGNAL LOST';
+  deathTextEl.textContent = playerScored ? 'FRAG!' : 'ZAPPED!';
+  deathTextEl.className   = 'death-text ' + (playerScored ? 'cpu-pt' : 'player-pt');
+  deathSubEl.textContent  = `SCORE  ${pScore} — ${cScore}`;
+  deathScreen.style.display = 'flex';
+  setTimeout(() => {
+    deathScreen.style.display = 'none';
+    startCountdown(playerScored ? -1 : 1);
+  }, 1000);
+}
+
+// ── Countdown ─────────────────────────────────────────────────
+function startCountdown(dir) {
+  inCountdown = true;
+  resetBall(dir);
+  countdownEl.style.display = 'flex';
+  const steps = ['3','2','1','GO!'];
+  let idx = 0;
+  function tick() {
+    const val = steps[idx];
+    countdownNum.textContent = val;
+    countdownNum.className = val === 'GO!' ? 'go' : '';
+    countdownNum.style.animation = 'none';
+    void countdownNum.offsetWidth;
+    countdownNum.style.animation = '';
+    sfxCountdown(val === 'GO!');
+    idx++;
+    if (idx < steps.length) {
+      setTimeout(tick, 700);
+    } else {
+      setTimeout(() => {
+        countdownEl.style.display = 'none';
+        inCountdown = false; running = true;
+      }, 400);
+    }
+  }
+  tick();
+}
+
+// ── Start / End ───────────────────────────────────────────────
+function startGame() {
+  // Kick off audio context & music on first user gesture
+  getAudioCtx();
+  if (musicOn && !musicScheduled) startMusic();
+
+  pScore = 0; cScore = 0;
+  pScoreEl.textContent = '0'; cScoreEl.textContent = '0';
+  pY = H/2 - PAD_H/2; cY = H/2 - PAD_H/2;
+  particles = []; running = false; paused = false;
+  overlay.style.display      = 'none';
+  pauseScreen.style.display  = 'none';
+  deathScreen.style.display  = 'none';
+  startCountdown(Math.random() > 0.5 ? 1 : -1);
+}
+
+function showEndGame(playerWon) {
+  running = false; inCountdown = false;
+  countdownEl.style.display = 'none';
+  deathScreen.style.display = 'none';
+  overlayTitle.textContent = playerWon ? 'VICTORY' : 'SYSTEM FAILURE';
+  overlayTitle.style.color = playerWon ? 'var(--cyan)' : 'var(--magenta)';
+  overlayTitle.style.textShadow = playerWon
+    ? '0 0 10px #00f5ff,0 0 30px #00f5ff55'
+    : '0 0 10px #ff00aa,0 0 30px #ff00aa55';
+  resultMsg.textContent = playerWon ? '> SYSTEM OVERRIDE COMPLETE' : '> CPU DOMINANCE ACHIEVED';
+  resultMsg.className   = 'result ' + (playerWon ? 'win' : 'lose');
+  startBtn.textContent  = 'PLAY AGAIN';
+  overlay.style.display = 'flex';
+}
+
+// ── Pause ──────────────────────────────────────────────────────
+document.addEventListener('keydown', e => {
+  if (e.key !== 'Escape') return;
+  if (overlay.style.display === 'flex') return;
+  if (inCountdown || deathScreen.style.display === 'flex') return;
+  paused = !paused;
+  pauseScreen.style.display = paused ? 'flex' : 'none';
+  setMusicVolume(paused ? 0.08 : (musicOn ? 0.4 : 0));
+});
+
+// ── Input ──────────────────────────────────────────────────────
+canvas.addEventListener('mousemove', e => {
+  const rect = canvas.getBoundingClientRect();
+  pY = Math.max(0, Math.min(H - PAD_H, e.clientY - rect.top - PAD_H/2));
+});
+document.addEventListener('mousemove', e => {
+  cursor.style.left = e.clientX + 'px';
+  cursor.style.top  = e.clientY + 'px';
+});
+
+startBtn.addEventListener('click', startGame);
+loop();
+</script>
+</body>
+</html>
